@@ -2,6 +2,8 @@
 
 The EAM-AutoUpdater is a PowerShell-based automation tool for Microsoft Intune Enterprise Application Management (EAM). It monitors the EAM catalog for available app updates, automatically deploys new versions, and migrates assignments, metadata, and configuration from the previous version — keeping your Intune environment up to date with minimal manual effort.
 
+![Overview](./Documentation/Screenshots/solution-overview.png)
+
 The script is designed to run as an Azure Automation runbook using a managed identity, but can also be executed interactively for testing.
 
 ## Features
@@ -15,7 +17,7 @@ The script is designed to run as an Azure Automation runbook using a managed ide
   - Assignment filter settings (include/exclude mode and filter ID)
   - Delivery optimization priority
   - Notification settings
-  - Auto-update settings for available intent assignments
+  - Auto-update settings for available intent assignments, since the previous package version will remain in the tenant and the assignments are left intact, the auto update setting will also automatically push the update, without any user interaction required. 
 - **Metadata migration**: Copies the following properties from the previous app to the new app:
   - Scope tags (role scope tag IDs)
   - Company Portal featured state
@@ -146,6 +148,9 @@ An example,
 * You publish Application version 1.0 from the Enterprise App Catalog. 
 * Microsoft releases version 1.1, the EAM AutoUpdater will create the version 1.1 for you and supersede version 1.0.
 * Microsfot releases version 1.2, the EAM AutoUpdater will, supersede version 1.1 with version 1.2. Remove the supersedence between version 1.1 and 1.0 and delete the app with version 1.0.
+
+### How can I get the application logos to show up?
+Intune Enterprise Application Management does not automatically add the Applications logos to the app. Instead you have to manually add them to the respective package. You have to add the Logo to the latest version available, once done the EAM-AutoUpdater will migrate the Logo to any newer version available. 
 
 ## Disclaimer
 
