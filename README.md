@@ -171,10 +171,6 @@ Follow the following setup guide for more detailed instructions:
 * [Configure Update Rings](./Documentation/04-Configure-UpdateRings.md)
 * [Configure Custom Command Line Parameters](./Documentation/05-Configure-CustomCommandLineParameters.md)
 
-## Public Preview Notice
-
-The EAM-AutoUpdater is currently in public preview. Your feedback is very much appreciated.
-
 ## FAQ
 
 > **Note:** For questions regarding Microsoft Intune Enterprise Application Management, refer to [Microsoft's FAQ](https://learn.microsoft.com/en-us/intune/intune-service/apps/apps-enterprise-app-management#frequently-asked-questions-faq)
