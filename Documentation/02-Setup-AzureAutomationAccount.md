@@ -60,6 +60,7 @@ Now we need to grant the required permissions to the Managed Identity.
 | `DeviceManagementApps.ReadWrite.All` | Read and write mobile apps, assignments, relationships, categories, and the EAM update report |
 | `Group.Read.All` | Read Entra ID group properties for assignment migration |
 | `DeviceManagementServiceConfig.ReadWrite.All` | Read and write Enrollment Status Page configurations and assignment filters > **Note:** Some Graph API calls target the **beta** endpoint. |
+| `DeviceManagementRBAC.Read.All` | Required to read Scope Tag information associated with Catalog Apps |
 
 > **Note:** The `DeviceManagementServiceConfig.ReadWrite.All` permission is only required if you intend to update the application in the ESP. If you don't want to update your ESP profile make sure to remove the permission scope from the below snippet. 
 
@@ -71,7 +72,7 @@ You can assign the permissions by using the following PowerShell snippet:
 Connect-MgGraph -Scopes "AppRoleAssignment.ReadWrite.All", "Application.Read.All"
 
 $managedIdentityObjectId = "<Managed Identity Object ID>"
-$permissions = "DeviceManagementManagedDevices.Read.All","DeviceManagementConfiguration.Read.All","DeviceManagementApps.ReadWrite.All", "Group.Read.All","DeviceManagementServiceConfig.ReadWrite.All"
+$permissions = "DeviceManagementManagedDevices.Read.All","DeviceManagementConfiguration.Read.All","DeviceManagementApps.ReadWrite.All", "Group.Read.All","DeviceManagementRBAC.Read.All","DeviceManagementServiceConfig.ReadWrite.All"
 
 $graphApi = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
 $permissions = $graphApi.AppRoles | Where-Object { $_.Value -in $permissions -and $_.AllowedMemberTypes -contains "Application" }

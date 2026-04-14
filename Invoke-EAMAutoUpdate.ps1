@@ -123,7 +123,11 @@ function Invoke-TeamsWebhook {
         )
 
         if ($AssignmentInfo) {
-            $groupedAssignments = $AssignmentInfo | Group-Object -Property AssignmentMode
+            $assignmentModeOrder = @('Required', 'Exclude: required', 'Available', 'Exclude: available', 'Uninstall', 'Exclude: uninstall')
+            $groupedAssignments = $AssignmentInfo | Group-Object -Property AssignmentMode | Sort-Object {
+                $index = $assignmentModeOrder.IndexOf($_.Name)
+                if ($index -lt 0) { 999 } else { $index }
+            }
 
             foreach ($group in $groupedAssignments) {
                 $cardBody += @{
@@ -139,7 +143,8 @@ function Invoke-TeamsWebhook {
                         cells = @(
                             @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = 'Group' }) },
                             @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = 'Filter mode' }) },
-                            @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = 'Filter name' }) }
+                            @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = 'Filter name' }) },
+                            @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = 'Availability' }) }
                         )
                     }
                 )
@@ -150,7 +155,8 @@ function Invoke-TeamsWebhook {
                         cells = @(
                             @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = "$($assignment.Group)"; wrap = $true }) },
                             @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = "$($assignment.FilterMode)"; wrap = $true }) },
-                            @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = "$($assignment.FilterName)"; wrap = $true }) }
+                            @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = "$($assignment.FilterName)"; wrap = $true }) },
+                            @{ type = 'TableCell'; items = @(@{ type = 'TextBlock'; text = "$($assignment.Availability)"; wrap = $true }) }
                         )
                     }
                 }
@@ -158,6 +164,7 @@ function Invoke-TeamsWebhook {
                 $cardBody += @{
                     type    = 'Table'
                     columns = @(
+                        @{ width = 1 },
                         @{ width = 1 },
                         @{ width = 1 },
                         @{ width = 1 }
@@ -215,6 +222,8 @@ function Invoke-TeamsWebhook {
                     content     = @{
                         '$schema' = 'http://adaptivecards.io/schemas/adaptive-card.json'
                         type      = 'AdaptiveCard'
+                        version   = '1.5'
+                        msteams   = @{ width = 'Full' }
                         body      = $cardBody
                     }
                 }
@@ -704,9 +713,20 @@ function Copy-MobileAppMetadata {
         ForEach-Object { "$_" } |
         Select-Object -Unique
 
+    $validatedScopeTagIds = [System.Collections.Generic.List[string]]::new()
+    foreach ($tagId in $roleScopeTagIds) {
+        try {
+            Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/roleScopeTags/$tagId" -Method Get -ErrorAction Stop | Out-Null
+            $validatedScopeTagIds.Add($tagId)
+        }
+        catch {
+            Write-Warning "Skipping scope tag $tagId — it no longer exists."
+        }
+    }
+
     $metadataParams = [ordered]@{
         '@odata.type'   = '#microsoft.graph.win32CatalogApp'
-        roleScopeTagIds = @($roleScopeTagIds)
+        roleScopeTagIds = @($validatedScopeTagIds)
         isFeatured      = [bool]$SourceApp.IsFeatured
         owner           = [string]$SourceApp.Owner
         notes           = [string]$SourceApp.Notes
@@ -785,7 +805,15 @@ function Invoke-EAMAutoupdate {
 
         [Parameter(Mandatory = $false)]
         [string[]]
-        $ExcludeApps = @()
+        $ExcludeApps = @(),
+
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $UpdateRings,
+
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $CommandLineParameters
     )
 
     begin {
@@ -875,6 +903,42 @@ function Invoke-EAMAutoupdate {
                 throw "Could not initiate supersedence between version $currentAppVersion and $latestAvailableVersion of the app $($app.ApplicationName). Error: $_"
             }
 
+            if ($CommandLineParameters) {
+                $matchingCommandLine = $CustomCommandLineParameters | Where-Object {
+                    $_.ApplicationName -eq $app.ApplicationName
+                }
+
+                if ($matchingCommandLine) {
+                    $commandLineUpdate = @{
+                        '@odata.type' = '#microsoft.graph.win32CatalogApp'
+                    }
+
+                    $installParam = $matchingCommandLine.AdditionalInstallParameter
+                    $uninstallParam = $matchingCommandLine.AdditionalUninstallParameter
+
+                    if ($installParam) {
+                        $currentInstallCmd = $deployedApp.installCommandLine
+                        $commandLineUpdate.installCommandLine = "$currentInstallCmd $installParam"
+                        Write-Output "  Appending install command line parameter: $installParam"
+                    }
+
+                    if ($uninstallParam) {
+                        $currentUninstallCmd = $deployedApp.uninstallCommandLine
+                        $commandLineUpdate.uninstallCommandLine = "$currentUninstallCmd $uninstallParam"
+                        Write-Output "  Appending uninstall command line parameter: $uninstallParam"
+                    }
+
+                    if ($installParam -or $uninstallParam) {
+                        try {
+                            Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$($deployedApp.id)" -Method Patch -Body ($commandLineUpdate | ConvertTo-Json -Depth 5) -ContentType 'application/json' | Out-Null
+                        }
+                        catch {
+                            throw "Failed to update command line parameters for $($app.ApplicationName). Error: $_"
+                        }
+                    }
+                }
+            }
+
             # Read the current app assignments so they can be re-created on the new app.
             $previousVersionAppAssignments = Get-MgBetaDeviceAppManagementMobileAppAssignment -MobileAppId $app.ApplicationId | Sort-Object Settings
             $previousVersionAppAssignments = $previousVersionAppAssignments | Sort-Object -Descending { $_.Settings.AdditionalProperties.Count }
@@ -888,7 +952,10 @@ function Invoke-EAMAutoupdate {
                 foreach ($previousVersionAppAssignment in $previousVersionAppAssignments) {
                     # Assignment identifiers are emitted in the format '<groupId>_0_0'.
                     $assignmentGroupId = ($previousVersionAppAssignment.Id -split '_')[0]
-                    $isExcludeAssignment = $previousVersionAppAssignment.Target.AdditionalProperties.'@odata.type' -eq '#microsoft.graph.exclusionGroupAssignmentTarget'
+                    $isExcludeAssignment = (
+                        $previousVersionAppAssignment.Target.AdditionalProperties.'@odata.type' -eq '#microsoft.graph.exclusionGroupAssignmentTarget' -or
+                        $previousVersionAppAssignment.Target.'@odata.type' -eq '#microsoft.graph.exclusionGroupAssignmentTarget'
+                    )
 
                     if (-not $isExcludeAssignment) {
                         if ($previousVersionAppAssignment.Target.DeviceAndAppManagementAssignmentFilterType -eq 'none') {
@@ -917,7 +984,14 @@ function Invoke-EAMAutoupdate {
                             }
                         }
                         else {
-                            $assignmentGroup = Get-MgGroup -GroupId $assignmentGroupId
+                            try {
+                                $assignmentGroup = Get-MgGroup -GroupId $assignmentGroupId -ErrorAction Stop
+                            }
+                            catch {
+                                Write-Warning "Skipping assignment for group $assignmentGroupId — the group no longer exists."
+                                continue
+                            }
+
                             $target = @{
                                 '@odata.type'                                = '#microsoft.graph.groupAssignmentTarget'
                                 groupId                                    = $assignmentGroup.Id
@@ -948,13 +1022,6 @@ function Invoke-EAMAutoupdate {
                             $previousFilterId
                         }
 
-                        $appAssignmentsObject.Add([PSCustomObject]@{
-                                AssignmentMode = $assignmentMode
-                                Group          = $assignmentGroup.DisplayName
-                                FilterMode     = if ($previousFilterType) { $previousFilterType } else { 'none' }
-                                FilterName     = $filterName
-                            })
-
                         $settings = @{
                             '@odata.type'                 = '#microsoft.graph.win32CatalogAppAssignmentSettings'
                             installTimeSettings          = $null
@@ -969,6 +1036,74 @@ function Invoke-EAMAutoupdate {
                                 '@odata.type'                 = '#microsoft.graph.win32LobAppAutoUpdateSettings'
                             }
                         }
+
+                        $availabilityText = 'As soon as possible'
+
+                        if ($UpdateRings) {
+                            $matchingRing = $UpdateRingSettings | Where-Object {
+                                $_.ApplicationName -eq $app.ApplicationName -and
+                                $_.Assignmenttype -eq $assignmentIntent -and
+                                $_.groupId -eq $assignmentGroupId
+                            }
+
+                            if ($matchingRing) {
+                                $delayDays = [int]$matchingRing.DaysinDelay
+                                $availabilityHour = if ($null -ne $matchingRing.AvailabilityTimeHour) { [int]$matchingRing.AvailabilityTimeHour } else { $null }
+                                $ringTimeZoneId = $matchingRing.TimeZoneId
+
+                                if ($ringTimeZoneId) {
+                                    $targetTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById($ringTimeZoneId)
+                                    $nowInZone = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $targetTimeZone)
+                                    $scheduledLocal = $nowInZone.Date.AddDays($delayDays)
+
+                                    if ($null -ne $availabilityHour) {
+                                        $scheduledLocal = $scheduledLocal.AddHours($availabilityHour)
+                                    }
+
+                                    if ($assignmentIntent -eq 'required') {
+                                        $utcOffset = $targetTimeZone.GetUtcOffset($scheduledLocal)
+                                        $offsetString = '{0}{1:00}:{2:00}' -f $(if ($utcOffset -lt [TimeSpan]::Zero) { '-' } else { '+' }), [Math]::Abs($utcOffset.Hours), $utcOffset.Minutes
+                                        $startDateTime = $scheduledLocal.ToString('yyyy-MM-ddTHH:mm:ss') + $offsetString
+                                        $useLocalTime = $true
+                                    }
+                                    else {
+                                        $startDateTimeUtc = [System.TimeZoneInfo]::ConvertTimeToUtc($scheduledLocal, $targetTimeZone)
+                                        $startDateTime = $startDateTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                                        $useLocalTime = $false
+                                    }
+
+                                    $availabilityText = $scheduledLocal.ToString('yyyy-MM-dd HH:mm') + " ($ringTimeZoneId)"
+                                }
+                                else {
+                                    $baseDateTime = (Get-Date).ToUniversalTime().Date.AddDays($delayDays)
+
+                                    if ($null -ne $availabilityHour) {
+                                        $baseDateTime = $baseDateTime.AddHours($availabilityHour)
+                                    }
+
+                                    $startDateTime = $baseDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                                    $availabilityText = $baseDateTime.ToString('yyyy-MM-dd HH:mm') + ' UTC'
+                                    $useLocalTime = $false
+                                }
+
+                                $settings.installTimeSettings = @{
+                                    '@odata.type'    = '#microsoft.graph.mobileAppInstallTimeSettings'
+                                    startDateTime    = $startDateTime
+                                    deadlineDateTime = $null
+                                    useLocalTime     = $useLocalTime
+                                }
+
+                                Write-Output "  Applied update ring delay of $delayDays day(s) for group $($assignmentGroup.DisplayName). Availability: $availabilityText"
+                            }
+                        }
+
+                        $appAssignmentsObject.Add([PSCustomObject]@{
+                                AssignmentMode = $assignmentMode
+                                Group          = $assignmentGroup.DisplayName
+                                FilterMode     = if ($previousFilterType) { $previousFilterType } else { 'none' }
+                                FilterName     = $filterName
+                                Availability   = $availabilityText
+                            })
 
                         $params = @{
                             '@odata.type' = '#microsoft.graph.mobileAppAssignment'
@@ -987,7 +1122,14 @@ function Invoke-EAMAutoupdate {
                         Write-Output "  Migrated assignment: $assignmentMode -> $($assignmentGroup.DisplayName)"
                     }
                     else {
-                        $assignmentGroup = Get-MgGroup -GroupId $assignmentGroupId
+                        try {
+                            $assignmentGroup = Get-MgGroup -GroupId $assignmentGroupId -ErrorAction Stop
+                        }
+                        catch {
+                            Write-Warning "Skipping exclusion assignment for group $assignmentGroupId — the group no longer exists."
+                            continue
+                        }
+
                         $target = @{
                             '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'
                             groupId       = $assignmentGroup.Id
@@ -1112,4 +1254,16 @@ catch {
     throw "Failed to connect to Graph. Error: $_"
 }
 
-Invoke-EAMAutoupdate -TeamsWebhookUri <TeamsWebhookUri> -UpdateESP -ExcludeApps <"draw.io Desktop">
+### Examples for Update Rings and Custom CommandLineParameters. Uncomment and customize as needed.
+
+#$UpdateRingSettings = @(
+#    [PSCustomObject]@{ApplicationName = 'Chrome for Business 64-bit'; Assignmenttype = 'available'; groupId = '223f4e5b-61a6-47cc-a13c-e2649bc3ad31'; DaysinDelay = '3'; AvailabilityTimeHour = 9; TimeZoneId = 'W. Europe Standard Time' }
+#)
+#$CustomCommandLineParameters = @(
+#    [PSCustomObject]@{ApplicationName = 'Chrome for Business 64-bit'; AdditionalInstallParameter = '/test-install'; AdditionalUninstallParameter = '/test-uninstall' }
+#)
+
+Invoke-EAMAutoupdate -TeamsWebhookUri <"TeamsWebhookUri"> -UpdateESP -ExcludeApps <"draw.io Desktop"> -UpdateRings -CommandLineParameters
+
+
+
