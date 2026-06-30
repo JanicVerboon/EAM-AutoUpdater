@@ -10,7 +10,8 @@ function Invoke-TeamsWebhook {
     version numbers, and optionally the migrated assignments and app icon.
 
     .PARAMETER TeamsWebhookUri
-    The Teams or Power Automate webhook endpoint that receives the adaptive card payload.
+    One or more Teams or Power Automate webhook endpoints that receive the adaptive card payload.
+    When multiple URIs are supplied the card is posted to each one.
 
     .PARAMETER DeployedAppDisplayName
     The display name of the application that was published.
@@ -34,7 +35,7 @@ function Invoke-TeamsWebhook {
     param (
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]
+        [string[]]
         $TeamsWebhookUri,
 
         [Parameter(Mandatory = $true)]
@@ -232,11 +233,13 @@ function Invoke-TeamsWebhook {
 
         Write-Output "Sending Teams notification for $DeployedAppDisplayName..."
 
-        try {
-            Invoke-MgGraphRequest -Uri $TeamsWebhookUri -Method Post -Body $card -ContentType 'application/json'
-        }
-        catch {
-            throw "Could not send the Teams webhook. Error: $_"
+        foreach ($uri in $TeamsWebhookUri) {
+            try {
+                Invoke-MgGraphRequest -Uri $uri -Method Post -Body $card -ContentType 'application/json'
+            }
+            catch {
+                Write-Warning "Could not send the Teams webhook to $uri. Error: $_"
+            }
         }
     }
 }
@@ -784,7 +787,8 @@ function Invoke-EAMAutoupdate {
     - optionally sends a Teams notification for the deployment
 
     .PARAMETER TeamsWebhookUri
-    Optional Teams or Power Automate webhook URL used for deployment notifications.
+    Optional Teams or Power Automate webhook URL(s) used for deployment notifications.
+    Supply multiple URIs to post the adaptive card to more than one Teams channel.
 
     .PARAMETER UpdateESP
     When specified, replaces the current app with the newly deployed app in any
@@ -796,7 +800,7 @@ function Invoke-EAMAutoupdate {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [string]
+        [string[]]
         $TeamsWebhookUri,
 
         [Parameter(Mandatory = $false)]

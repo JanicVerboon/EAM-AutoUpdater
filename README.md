@@ -30,7 +30,7 @@ The script is designed to run as an Azure Automation runbook using a managed ide
 - **App exclusions**: Allows specific apps to be skipped by display name.
 - **Update Rings**: Configure Update Rings and delay the deployment of new application versions to specific applications by using the Win32 App availability setting.
 - **Custom command line parameters**: Append additional install and/or uninstall command line parameters to specific apps. Define entries in the `$CustomCommandLineParameters` array, and the script will append the specified values to the catalog-provided `installCommandLine` and `uninstallCommandLine` when deploying the new version.
-- **Teams notifications**: Sends an adaptive card to a Teams channel (via Power Automate webhook) summarizing the deployment, migrated assignments, and ESP updates.
+- **Teams notifications**: Sends an adaptive card to one or more Teams channels (via Power Automate webhook) summarizing the deployment, migrated assignments, and ESP updates.
 
 ![Example1](./Documentation/Screenshots/UpdateRingsNotification.png)
 
@@ -69,7 +69,7 @@ The managed identity (or app registration) used to run the script requires the f
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `TeamsWebhookUri` | `string` | No | *(empty)* | The Power Automate or Teams webhook URL for posting deployment notifications. When omitted, no Teams notification is sent. |
+| `TeamsWebhookUri` | `string[]` | No | *(empty)* | One or more Power Automate or Teams webhook URLs for posting deployment notifications. When omitted, no Teams notification is sent. When multiple URLs are supplied the adaptive card is posted to each one. |
 | `UpdateESP` | `switch` | No | `$false` | When specified, the script replaces the previous app with the new version in any Enrollment Status Page that tracks it. |
 | `ExcludeApps` | `string[]` | No | `@()` | An array of application display names to skip during processing. Apps whose name matches an entry in this list will not be updated. |
 | `UpdateRings` | `switch` | No | `$false` | When specified the script will check if you have any Update ring settings configured in your code. For more information about how to setup your update rings, consult the [configure Update Ring documentation](./Documentation/04-Configure-UpdateRings.md) |
@@ -92,6 +92,14 @@ Invoke-EAMAutoupdate -TeamsWebhookUri "https://prod-XX.westeurope.logic.azure.co
 ```
 
 Same as above, but sends an adaptive card to the configured Teams channel for each deployed app.
+
+### With multiple Teams webhooks
+
+```powershell
+Invoke-EAMAutoupdate -TeamsWebhookUri "https://prod-XX.westeurope.logic.azure.com:443/workflows/...", "https://prod-YY.westeurope.logic.azure.com:443/workflows/..."
+```
+
+Sends the adaptive card to each webhook in the array. Useful when you want to notify multiple Teams channels or Power Automate flows.
 
 ### With Enrollment Status Page updates
 
@@ -208,6 +216,14 @@ Yes. You can run `Invoke-EAMAutoupdate` interactively in a PowerShell session. A
 
 #### Can I use this script with Conditional Access or MFA?
 When running in Azure Automation with a managed identity, Conditional Access and MFA do not apply — the managed identity authenticates directly. For interactive testing, `Connect-MgGraph` will prompt for MFA if your Conditional Access policies require it.
+
+#### I am using Intune Multi Admin approval within Microsoft Intune, will this impact the EAM-AutoUpdater?
+Yes. If you have deployed an Multi Admin Approval Policy you need to exclude the EAM-AutoUpdater's managed identity from the Intune Multi Admin Approval policy which is targeted towards Applications.
+To learn more how you can exlcude the managed identity from the Multi Admin Approval Policy, refer to the [Microsoft docs](https://learn.microsoft.com/en-gb/intune/fundamentals/role-based-access-control/multi-admin-approval-graph-api#exclude-an-application-from-maa-enforcement)
+
+#### Does the EAM-AutoUpdater support justification headers for Multi Admin Approval?
+No. At present the EAM-AutoUpdater does not send requests with the justification headers, required for Multi Admin Approvals.
+[More information about this topic can be found here](https://learn.microsoft.com/en-gb/intune/fundamentals/role-based-access-control/multi-admin-approval-graph-api)
 
 ### Permissions
 
