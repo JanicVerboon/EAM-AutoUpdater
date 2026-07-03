@@ -45,14 +45,6 @@ To perform the steps listed on this page you need the following permissions:
 
 Now we need to grant the required permissions to the Managed Identity. 
 
-| Graph Permission | Description |
-| ------------ | -------------|
-| "DeviceManagementManagedDevices.Read.All" | Required to read the Win32CatalogAppsUpdate Report |
-| "DeviceManagementApps.ReadWrite.All" | Required to read all Managed Apps / Create, Update and Delete Apps. |
-| "Group.Read.All" | Required to read basic group informations related to the assignments |
-| "DeviceManagementConfiguration.Read.All" | Required to read Filter information related to the assignments"
-| "DeviceManagementConfiguration.ReadWrite.All" | Required in case you want to update the device ESP with the newly released apps |
-
 | Permission | Purpose |
 |---|---|
 | `DeviceManagementManagedDevices.Read.All` | Required to read the Win32CatalogAppsUpdate Report |
